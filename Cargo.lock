@@ -390,6 +390,7 @@ dependencies = [
 name = "games"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "hyper",
  "mysql",
  "rand",
@@ -707,7 +708,7 @@ dependencies = [
 [[package]]
 name = "mysql"
 version = "0.1.0"
-source = "git+https://github.com/Somebody62/mysql#f42c14ea3792d2b5d86882d7917485315e6de292"
+source = "git+https://github.com/Somebody62/mysql#9fc15ffd61d97e1c1515c11733029b367c1acb20"
 dependencies = [
  "mysql_async",
 ]

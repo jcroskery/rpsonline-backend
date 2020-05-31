@@ -12,3 +12,4 @@ hyper = "0.13.6"
 tokio = { version = "0.2.21", features = ["full"]}
 mysql = { git = "https://github.com/Somebody62/mysql" }
 rand = "0.7.3"
+chrono = "0.4.11"
