@@ -25,6 +25,7 @@ pub async fn formulate_response(url: &str, body: HashMap<&str, &str>) -> String 
     match url {
         "/new_game" => new_game(body).await,
         "/new_id" => new_id().await,
+        "/get_status_of_human_game" => get_status_of_human_game(body).await,
         _ => message(&format!("The provided url {} could not be resolved.", url)),
     }
 }
@@ -41,6 +42,24 @@ async fn new_id() -> String {
         .await
         .ok();
     json!({ "id": id }).to_string()
+}
+
+async fn update_last_contact(game_id: &str, player: i32) {
+    mysql::change_row_where("games", "id", game_id, &format!("player_{}_time", player), &now()).await;
+}
+
+async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
+    if mysql::row_exists("game_users", "id", body["id"]).await {
+        let game_id = mysql::get_some_like("game_users", "game", "id", body["id"]).await;
+        let game_id = mysql::from_value::<i64>(game_id[0][0].clone()).to_string();
+        let game = &mysql::get_like("games", "id", &game_id).await[0];
+        if mysql::from_value::<String>(game[3].clone()) == body["id"] {
+            update_last_contact(&game_id, 1).await;
+        } else {
+            update_last_contact(&game_id, 2).await;
+        }
+    }
+    String::new()
 }
 
 async fn new_game(body: HashMap<&str, &str>) -> String {
@@ -94,8 +113,8 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 "1",
                 "0",
                 "0",
-                &Utc::now().timestamp().to_string(),
-                &Utc::now().timestamp().to_string(),
+                &now(),
+                &now(),
                 "",
                 "",
             ],
@@ -106,4 +125,8 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
     } else {
         String::new()
     }
+}
+
+fn now() -> String {
+    Utc::now().timestamp().to_string()
 }
