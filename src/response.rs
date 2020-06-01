@@ -7,6 +7,12 @@ use rand::distributions::{Alphanumeric, Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use serde_json::json;
 
+macro_rules! get_one_cell {
+    ($table:expr, $value:expr, $where_name:expr, $where_value:expr, $type:ty) => {
+        mysql::from_value::<$type>(mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone()).to_string()
+    };
+}
+
 fn message(message: &str) -> String {
     json!({ "message": message }).to_string()
 }
@@ -48,15 +54,23 @@ async fn update_last_contact(game_id: &str, player: i32) {
     mysql::change_row_where("games", "id", game_id, &format!("player_{}_time", player), &now()).await;
 }
 
+async fn check_quit_game(game_id: &str, player: i32) {
+    let player_time = get_one_cell!("games", &format!("player_{}_time", player), "id", game_id, i32);
+    if player_time < now() {
+        println!("{}{}", player_time, now());
+    }
+}
+
 async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
     if mysql::row_exists("game_users", "id", body["id"]).await {
-        let game_id = mysql::get_some_like("game_users", "game", "id", body["id"]).await;
-        let game_id = mysql::from_value::<i64>(game_id[0][0].clone()).to_string();
+        let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
         let game = &mysql::get_like("games", "id", &game_id).await[0];
         if mysql::from_value::<String>(game[3].clone()) == body["id"] {
             update_last_contact(&game_id, 1).await;
+            check_quit_game(&game_id, 2).await;
         } else {
             update_last_contact(&game_id, 2).await;
+            check_quit_game(&game_id, 1).await;
         }
     }
     String::new()
@@ -65,7 +79,6 @@ async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
 async fn new_game(body: HashMap<&str, &str>) -> String {
     if mysql::row_exists("game_users", "id", body["id"]).await {
         let old_game = mysql::get_some_like("game_users", "game", "id", body["id"]).await;
-        println!("{:?}", old_game);
         if old_game[0][0] != mysql::NULL {
             mysql::change_row_where(
                 "games",
@@ -99,7 +112,6 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 "round",
                 "score_1",
                 "score_2",
-                "start_time",
                 "player_1_time",
                 "player_2_time",
                 "log",
@@ -113,7 +125,6 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 "1",
                 "0",
                 "0",
-                &now(),
                 &now(),
                 "",
                 "",
