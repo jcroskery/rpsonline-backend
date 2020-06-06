@@ -9,13 +9,18 @@ use serde_json::json;
 
 macro_rules! get_one_cell {
     ($table:expr, $value:expr, $where_name:expr, $where_value:expr, $type:ty) => {
-        mysql::from_value::<$type>(mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone()).to_string()
+        mysql::from_value::<$type>(
+            mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone(),
+        )
+        .to_string()
     };
 }
 
 macro_rules! try_get_one_cell {
     ($table:expr, $value:expr, $where_name:expr, $where_value:expr, $type:ty) => {
-        mysql::try_from_value::<$type>(mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone())
+        mysql::try_from_value::<$type>(
+            mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone(),
+        )
     };
 }
 
@@ -58,13 +63,25 @@ async fn new_id() -> String {
 }
 
 async fn update_last_contact(game_id: &str, player: i32) {
-    mysql::change_row_where("games", "id", game_id, &format!("player_{}_time", player), &now()).await;
+    mysql::change_row_where(
+        "games",
+        "id",
+        game_id,
+        &format!("player_{}_time", player),
+        &now(),
+    )
+    .await;
 }
 
 async fn check_quit_game(game_id: &str, player: i32) -> bool {
-    if let Some(player_time) = try_get_one_cell!("games", &format!("player_{}_time", player), "id", game_id, i64) {
+    if let Some(player_time) = try_get_one_cell!(
+        "games",
+        &format!("player_{}_time", player),
+        "id",
+        game_id,
+        i64
+    ) {
         if player_time + 60 < now().parse().unwrap() {
-            println!("{}{}", player_time, now());
             return true;
         }
     }
@@ -72,28 +89,47 @@ async fn check_quit_game(game_id: &str, player: i32) -> bool {
 }
 
 async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
-
-    String::new()
+    if mysql::row_exists("game_users", "id", body["id"]).await {
+        let games = mysql::get_some_like_null("games", "id", "player_2_id").await;
+        if games.len() != 0 {
+            let id: i64 = mysql::from_value(games[0][0].clone());
+            let player_1_id = get_one_cell!("games", "player_1_id", "id", &id.to_string(), String);
+            if player_1_id != body["id"] {
+                update_last_contact(&id.to_string(), 2).await;
+                mysql::change_row_where("games", "id", &id.to_string(), "player_2_id", body["id"])
+                    .await;
+                mysql::change_row_where("game_users", "id", body["id"], "game", &id.to_string())
+                    .await;
+                return json!({ "id": id }).to_string();
+            }
+        }
+    }
+    return json!( { "failed": true } ).to_string();
 }
 
-async fn quit_game(body: HashMap<&str, &str>) -> String {
+async fn quit_game(id: &str, body: HashMap<&str, &str>) -> String {
+    mysql::change_row_where("games", "id", id, "status", "1").await;
     String::from("Game over")
 }
 
 async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
     if mysql::row_exists("game_users", "id", body["id"]).await {
         let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
-        let game = &mysql::get_like("games", "id", &game_id).await[0];
-        if mysql::from_value::<String>(game[3].clone()) == body["id"] {
-            update_last_contact(&game_id, 1).await;
-            if check_quit_game(&game_id, 2).await {
-                return quit_game(body).await;
+        let game = &mysql::get_some_like("games", "player_1_id, status", "id", &game_id).await[0];
+        if mysql::from_value::<i64>(game[1].clone()) != 1 {
+            if mysql::from_value::<String>(game[0].clone()) == body["id"] {
+                update_last_contact(&game_id, 1).await;
+                if check_quit_game(&game_id, 2).await {
+                    return quit_game(&game_id, body).await;
+                }
+            } else {
+                update_last_contact(&game_id, 2).await;
+                if check_quit_game(&game_id, 1).await {
+                    return quit_game(&game_id, body).await;
+                }
             }
         } else {
-            update_last_contact(&game_id, 2).await;
-            if check_quit_game(&game_id, 1).await {
-                return quit_game(body).await;
-            }
+            return json!( {"status": 1} ).to_string();
         }
     }
     String::new()

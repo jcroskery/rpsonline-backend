@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "mysql"
 version = "0.1.0"
-source = "git+https://github.com/Somebody62/mysql#137e00ed7bf436d2425627f78eff99d10f9f9e00"
+source = "git+https://github.com/Somebody62/mysql#ddcc936ae15bc4e48a78126f34265caafe508df8"
 dependencies = [
  "mysql_async",
 ]
