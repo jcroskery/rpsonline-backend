@@ -13,6 +13,12 @@ macro_rules! get_one_cell {
     };
 }
 
+macro_rules! try_get_one_cell {
+    ($table:expr, $value:expr, $where_name:expr, $where_value:expr, $type:ty) => {
+        mysql::try_from_value::<$type>(mysql::get_some_like($table, $value, $where_name, $where_value).await[0][0].clone())
+    };
+}
+
 fn message(message: &str) -> String {
     json!({ "message": message }).to_string()
 }
@@ -32,6 +38,7 @@ pub async fn formulate_response(url: &str, body: HashMap<&str, &str>) -> String 
         "/new_game" => new_game(body).await,
         "/new_id" => new_id().await,
         "/get_status_of_human_game" => get_status_of_human_game(body).await,
+        "/search_for_human_game" => search_for_human_game(body).await,
         _ => message(&format!("The provided url {} could not be resolved.", url)),
     }
 }
@@ -54,11 +61,23 @@ async fn update_last_contact(game_id: &str, player: i32) {
     mysql::change_row_where("games", "id", game_id, &format!("player_{}_time", player), &now()).await;
 }
 
-async fn check_quit_game(game_id: &str, player: i32) {
-    let player_time = get_one_cell!("games", &format!("player_{}_time", player), "id", game_id, i32);
-    if player_time < now() {
-        println!("{}{}", player_time, now());
+async fn check_quit_game(game_id: &str, player: i32) -> bool {
+    if let Some(player_time) = try_get_one_cell!("games", &format!("player_{}_time", player), "id", game_id, i64) {
+        if player_time + 60 < now().parse().unwrap() {
+            println!("{}{}", player_time, now());
+            return true;
+        }
     }
+    false
+}
+
+async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
+
+    String::new()
+}
+
+async fn quit_game(body: HashMap<&str, &str>) -> String {
+    String::from("Game over")
 }
 
 async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
@@ -67,10 +86,14 @@ async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
         let game = &mysql::get_like("games", "id", &game_id).await[0];
         if mysql::from_value::<String>(game[3].clone()) == body["id"] {
             update_last_contact(&game_id, 1).await;
-            check_quit_game(&game_id, 2).await;
+            if check_quit_game(&game_id, 2).await {
+                return quit_game(body).await;
+            }
         } else {
             update_last_contact(&game_id, 2).await;
-            check_quit_game(&game_id, 1).await;
+            if check_quit_game(&game_id, 1).await {
+                return quit_game(body).await;
+            }
         }
     }
     String::new()
