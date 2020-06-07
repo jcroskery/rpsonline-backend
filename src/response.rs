@@ -6,6 +6,57 @@ use chrono::Utc;
 use rand::distributions::{Alphanumeric, Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use serde_json::json;
+use self::Outcomes::*;
+
+#[derive(Debug)]
+enum Outcomes {
+    WIN1,
+    WIN2,
+    TIE,
+    WAITING
+}
+
+impl Outcomes {
+    fn get_outcome(global_move: &str) -> Self {
+        if global_move == "0" || global_move == "5" || global_move == "a" {
+            TIE
+        } else if global_move == "1" || global_move == "6" || global_move == "8" {
+            WIN1
+        } else if global_move == "2" || global_move == "4" || global_move == "9" {
+            WIN2
+        } else {
+            WAITING
+        }
+    }
+}
+
+fn get_global_move(player_1_move: &str, player_2_move: &str) -> String {
+    format!("{:x}", (player_1_move.parse::<i32>().unwrap() * 4) + player_2_move.parse::<i32>().unwrap())
+}
+
+fn get_player_1_move(global_move: &str) -> &str {
+    if global_move == "0" || global_move == "4" || global_move == "8" || global_move == "c" {
+        "0"
+    } else if global_move == "1" || global_move == "5" || global_move == "9" || global_move == "d" {
+        "1"
+    } else if global_move == "2" || global_move == "6" || global_move == "a" || global_move == "e" {
+        "2"
+    } else {
+        "3"
+    }
+}
+
+fn get_player_2_move(global_move: &str) -> &str {
+    if global_move == "0" || global_move == "1" || global_move == "2" || global_move == "3" {
+        "0"
+    } else if global_move == "4" || global_move == "5" || global_move == "6" || global_move == "7" {
+        "1"
+    } else if global_move == "8" || global_move == "9" || global_move == "a" || global_move == "b" {
+        "2"
+    } else {
+        "3"
+    }
+}
 
 macro_rules! get_one_cell {
     ($table:expr, $value:expr, $where_name:expr, $where_value:expr, $type:ty) => {
@@ -42,8 +93,9 @@ pub async fn formulate_response(url: &str, body: HashMap<&str, &str>) -> String 
     match url {
         "/new_game" => new_game(body).await,
         "/new_id" => new_id().await,
-        "/get_status_of_human_game" => get_status_of_human_game(body).await,
+        "/get_status_of_game" => get_status_of_game(body).await,
         "/search_for_human_game" => search_for_human_game(body).await,
+        "/make_move" => make_move(body).await,
         _ => message(&format!("The provided url {} could not be resolved.", url)),
     }
 }
@@ -81,7 +133,7 @@ async fn check_quit_game(game_id: &str, player: i32) -> bool {
         game_id,
         i64
     ) {
-        if player_time + 60 < now().parse().unwrap() {
+        if player_time + 600 < now().parse().unwrap() {
             return true;
         }
     }
@@ -107,32 +159,53 @@ async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
     return json!( { "failed": true } ).to_string();
 }
 
-async fn quit_game(id: &str, body: HashMap<&str, &str>) -> String {
+async fn quit_game(id: &str) -> i32 {
     mysql::change_row_where("games", "id", id, "status", "1").await;
-    String::from("Game over")
+    1
 }
 
-async fn get_status_of_human_game(body: HashMap<&str, &str>) -> String {
-    if mysql::row_exists("game_users", "id", body["id"]).await {
-        let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
+async fn get_status(id: &str) -> Option<i32> {
+    if mysql::row_exists("game_users", "id", id).await {
+        let game_id = get_one_cell!("game_users", "game", "id", id, i32);
         let game = &mysql::get_some_like("games", "player_1_id, status", "id", &game_id).await[0];
         if mysql::from_value::<i64>(game[1].clone()) != 1 {
-            if mysql::from_value::<String>(game[0].clone()) == body["id"] {
+            if mysql::from_value::<String>(game[0].clone()) == id {
                 update_last_contact(&game_id, 1).await;
                 if check_quit_game(&game_id, 2).await {
-                    return quit_game(&game_id, body).await;
+                    return Some(quit_game(&game_id).await);
                 }
             } else {
                 update_last_contact(&game_id, 2).await;
                 if check_quit_game(&game_id, 1).await {
-                    return quit_game(&game_id, body).await;
+                    return Some(quit_game(&game_id).await);
                 }
             }
+            return Some(0);
         } else {
-            return json!( {"status": 1} ).to_string();
+            return Some(1);
         }
     }
-    String::new()
+    None
+}
+
+async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
+    if let Some(status) = get_status(body["id"]).await {
+        json!({"status": status}).to_string()
+    } else {
+        json!({"success": false}).to_string()
+    }
+}
+
+async fn make_move(body: HashMap<&str, &str>) -> String {
+    let status = get_status(body["id"]).await;
+    if status == Some(0) {
+        println!("{:?}", &get_global_move("0", "2"));
+        json!({}).to_string()
+    } else if status == Some(1) {
+        json!({"status": 1}).to_string()
+    } else {
+        json!({"success": false}).to_string()
+    }
 }
 
 async fn new_game(body: HashMap<&str, &str>) -> String {
