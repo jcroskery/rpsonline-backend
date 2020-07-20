@@ -99,7 +99,7 @@ fn message(message: &str) -> String {
 }
 
 async fn log_game(game_id: &str) {
-    let game_string = String::from("hi\n");
+    let game_string = format!("{}\n", get_one_cell!("games", "log", "id", game_id, String));
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
@@ -188,6 +188,7 @@ async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
 
 async fn quit_game(id: &str) -> i32 {
     mysql::change_row_where("games", "id", id, "status", "1").await;
+    log_game(id).await;
     1
 }
 
@@ -221,22 +222,18 @@ async fn get_current_move(game_id: &str) -> String {
 
 async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
     if let Some(status) = get_status(body["id"]).await {
-        if status == 1 {
-            let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
-            let player_number = get_player_number(&game_id, body["id"]).await;
-            let global_move = get_current_move(&game_id).await;
-            if Outcomes::get_outcome(&global_move) == WAITING {
-                json!({ "status": 1, "waiting": 1}).to_string()
-            } else {
-                let opponent_move = if player_number == 1 {
-                    get_player_1_move(&global_move)
-                } else {
-                    get_player_2_move(&global_move)
-                };
-                json!({ "status": 1, "waiting": 0, "opponent_move": opponent_move}).to_string()
-            }
+        let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
+        let player_number = get_player_number(&game_id, body["id"]).await;
+        let global_move = get_current_move(&game_id).await;
+        if Outcomes::get_outcome(&global_move) == WAITING {
+            json!({ "status": status, "waiting": 1}).to_string()
         } else {
-            json!({ "status": 0 }).to_string()
+            let opponent_move = if player_number == 1 {
+                get_player_1_move(&global_move)
+            } else {
+                get_player_2_move(&global_move)
+            };
+            json!({ "status": status, "waiting": 0, "opponent_move": opponent_move}).to_string()
         }
     } else {
         json!({"success": false}).to_string()
