@@ -243,10 +243,6 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
     }
 }
 
-async fn game_over(game_id: &str, user_id: &str) -> String {
-    String::new()
-}
-
 async fn get_player_number(game_id: &str, user_id: &str) -> i32 {
     if user_id == get_one_cell!("games", "player_1_id", "id", game_id, String) {
         1
@@ -286,12 +282,12 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
             }
             WAITING => {
                 store_global_move(&game_id, &global_move, false).await;
-                return json!({"status": 0}).to_string();
+                return json!({}).to_string();
             }
             _ => {}
         }
         if scoring_info.0 == 3 || scoring_info.1 == 3 {
-            return game_over(&game_id, body["id"]).await;
+            quit_game(&game_id).await;
         }
         mysql::change_row_where(
             "games",
@@ -310,12 +306,8 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
         )
         .await;
         store_global_move(&game_id, &global_move, true).await;
-        json!({"status": 0}).to_string()
-    } else if status == Some(1) {
-        json!({"status": 1}).to_string()
-    } else {
-        json!({"success": false}).to_string()
     }
+    json!({}).to_string()
 }
 
 async fn new_game(body: HashMap<&str, &str>) -> String {
