@@ -259,6 +259,10 @@ async fn store_global_move(game_id: &str, global_move: &str, add_new_move: bool)
     mysql::change_row_where("games", "id", game_id, "log", &global_moves).await;
 }
 
+fn make_robot_move() -> String {
+    0.to_string()
+}
+
 async fn make_move(body: HashMap<&str, &str>) -> String {
     let status = get_status(body["id"]).await;
     if status == Some(0) {
@@ -270,6 +274,9 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
         } else {
             update_global_move(&get_current_move(&game_id).await, None, Some(body["move"]))
         };
+        if get_one_cell!("games", "type", "id", &game_id, i64) == "1" {
+            update_global_move(&get_current_move(&game_id).await, None, Some(&make_robot_move()));
+        }
         match Outcomes::get_outcome(&global_move) {
             WIN1 => {
                 scoring_info.0 += 1;
