@@ -160,7 +160,7 @@ async fn check_quit_game(game_id: &str, player: i32) -> bool {
         game_id,
         i64
     ) {
-        if player_time + 600 < now().parse().unwrap() {
+        if player_time + 5 < now().parse().unwrap() {
             return true;
         }
     }
@@ -179,11 +179,11 @@ async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
                     .await;
                 mysql::change_row_where("game_users", "id", body["id"], "game", &id.to_string())
                     .await;
-                return json!({ "id": id }).to_string();
+                return json!({ "success": true, "id": id }).to_string();
             }
         }
     }
-    return json!( { "failed": true } ).to_string();
+    return json!( { "success": false } ).to_string();
 }
 
 async fn quit_game(id: &str) -> i32 {
@@ -224,16 +224,40 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
     if let Some(status) = get_status(body["id"]).await {
         let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
         let player_number = get_player_number(&game_id, body["id"]).await;
+        if player_number == 1 {
+            let null_games = mysql::get_some_like_null("games", "id", "player_2_id").await;
+            for game in null_games {
+                if game_id == mysql::from_value::<i64>(game[0].clone()).to_string()
+                    && get_one_cell!("games", "type", "id", &game_id, i64) == "0"
+                {
+                    return json!({"opponent_found": false}).to_string();
+                }
+            }
+        }
         let global_move = get_current_move(&game_id).await;
-        if Outcomes::get_outcome(&global_move) == WAITING {
-            json!({ "status": status, "waiting": 1}).to_string()
+        if get_one_cell!("games", "score_1", "id", &game_id, i64) == "3"
+            || "3" == get_one_cell!("games", "score_2", "id", &game_id, i64)
+        {
+            let opponent_move = if player_number == 1 {
+                get_player_2_move(&global_move)
+            } else {
+                get_player_1_move(&global_move)
+            };
+            return json!({"opponent_found": true, "status": 2, "waiting": 0, "opponent_move": opponent_move}).to_string();
+        }
+        if (player_number == 1 && get_player_1_move(&global_move) == "3")
+            || (player_number == 2 && get_player_2_move(&global_move) == "3")
+        {
+            json!({ "opponent_found": true, "status": status, "waiting": 0}).to_string()
+        } else if Outcomes::get_outcome(&global_move) == WAITING {
+            json!({ "opponent_found": true, "status": status, "waiting": 1}).to_string()
         } else {
             let opponent_move = if player_number == 1 {
-                get_player_1_move(&global_move)
-            } else {
                 get_player_2_move(&global_move)
+            } else {
+                get_player_1_move(&global_move)
             };
-            json!({ "status": status, "waiting": 0, "opponent_move": opponent_move}).to_string()
+            json!({ "opponent_found": true, "status": status, "waiting": 0, "opponent_move": opponent_move}).to_string()
         }
     } else {
         json!({"success": false}).to_string()
@@ -248,15 +272,27 @@ async fn get_player_number(game_id: &str, user_id: &str) -> i32 {
     }
 }
 
-async fn store_global_move(game_id: &str, global_move: &str, add_new_move: bool) {
+async fn store_global_move(game_id: &str, global_move: &str) {
     let mut global_moves = get_one_cell!("games", "log", "id", &game_id, String);
     global_moves = global_moves.chars().take(global_moves.len() - 1).collect();
-    global_moves = if add_new_move {
-        format!("{}{}F", global_moves, global_move)
-    } else {
-        format!("{}{}", global_moves, global_move)
-    };
-    mysql::change_row_where("games", "id", game_id, "log", &global_moves).await;
+    mysql::change_row_where(
+        "games",
+        "id",
+        game_id,
+        "log",
+        &format!("{}{}", global_moves, global_move),
+    )
+    .await;
+}
+async fn add_new_move(game_id: &str) {
+    mysql::change_row_where(
+        "games",
+        "id",
+        game_id,
+        "log",
+        &format!("{}f", get_one_cell!("games", "log", "id", &game_id, String)),
+    )
+    .await;
 }
 
 async fn make_move(body: HashMap<&str, &str>) -> String {
@@ -265,13 +301,22 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
         let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
         let player_number = get_player_number(&game_id, body["id"]).await;
         let mut scoring_info = get_scoring_info(&game_id).await;
-        let global_move = if player_number == 1 {
+        if Outcomes::get_outcome(&get_current_move(&game_id).await) == WAITING {
+            add_new_move(&game_id).await;
+        }
+        let mut global_move = if player_number == 1 {
             update_global_move(&get_current_move(&game_id).await, Some(body["move"]), None)
         } else {
             update_global_move(&get_current_move(&game_id).await, None, Some(body["move"]))
         };
         if get_one_cell!("games", "type", "id", &game_id, i64) == "1" {
-            update_global_move(&get_current_move(&game_id).await, None, Some(&rockrobot::make_robot_move(&get_one_cell!("games", "log", "id", &game_id, String))));
+            global_move = update_global_move(
+                &global_move,
+                None,
+                Some(&rockrobot::make_robot_move(&get_one_cell!(
+                    "games", "log", "id", &game_id, String
+                ))),
+            );
         }
         match Outcomes::get_outcome(&global_move) {
             WIN1 => {
@@ -281,7 +326,7 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
                 scoring_info.1 += 1;
             }
             WAITING => {
-                store_global_move(&game_id, &global_move, false).await;
+                store_global_move(&game_id, &global_move).await;
                 return json!({}).to_string();
             }
             _ => {}
@@ -293,7 +338,7 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
             "games",
             "id",
             &game_id,
-            "player_1_score",
+            "score_1",
             &scoring_info.0.to_string(),
         )
         .await;
@@ -301,11 +346,11 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
             "games",
             "id",
             &game_id,
-            "player_2_score",
+            "score_2",
             &scoring_info.1.to_string(),
         )
         .await;
-        store_global_move(&game_id, &global_move, true).await;
+        store_global_move(&game_id, &global_move).await;
     }
     json!({}).to_string()
 }
