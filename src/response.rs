@@ -14,6 +14,7 @@ enum Outcomes {
     WIN2,
     TIE,
     WAITING,
+    UNDEFINED
 }
 
 impl Outcomes {
@@ -24,6 +25,8 @@ impl Outcomes {
             WIN1
         } else if global_move == "2" || global_move == "4" || global_move == "9" {
             WIN2
+        } else if global_move == " " {
+            UNDEFINED
         } else {
             WAITING
         }
@@ -173,7 +176,7 @@ async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
         if games.len() != 0 {
             let id: i64 = mysql::from_value(games[0][0].clone());
             let player_1_id = get_one_cell!("games", "player_1_id", "id", &id.to_string(), String);
-            if player_1_id != body["id"] {
+            if player_1_id != body["id"] && !check_quit_game(&id.to_string(), 1).await {
                 update_last_contact(&id.to_string(), 2).await;
                 mysql::change_row_where("games", "id", &id.to_string(), "player_2_id", body["id"])
                     .await;
@@ -301,7 +304,8 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
         let game_id = get_one_cell!("game_users", "game", "id", body["id"], i32);
         let player_number = get_player_number(&game_id, body["id"]).await;
         let mut scoring_info = get_scoring_info(&game_id).await;
-        if Outcomes::get_outcome(&get_current_move(&game_id).await) == WAITING {
+        let outcome = Outcomes::get_outcome(&get_current_move(&game_id).await);
+        if outcome != WAITING && outcome != UNDEFINED {
             add_new_move(&game_id).await;
         }
         let mut global_move = if player_number == 1 {
@@ -404,7 +408,7 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 "0",
                 &now(),
                 "",
-                "F",
+                " ",
             ],
         )
         .await
