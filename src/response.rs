@@ -189,10 +189,9 @@ async fn search_for_human_game(body: HashMap<&str, &str>) -> String {
     return json!( { "success": false } ).to_string();
 }
 
-async fn quit_game(id: &str) -> i32 {
+async fn quit_game(id: &str) {
     mysql::change_row_where("games", "id", id, "status", "1").await;
     log_game(id).await;
-    1
 }
 
 async fn get_status(id: &str) -> Option<i32> {
@@ -202,12 +201,12 @@ async fn get_status(id: &str) -> Option<i32> {
             if get_player_number(&game_id, &id).await == 1 {
                 update_last_contact(&game_id, 1).await;
                 if check_quit_game(&game_id, 2).await {
-                    return Some(quit_game(&game_id).await);
+                    return Some(1);
                 }
             } else {
                 update_last_contact(&game_id, 2).await;
                 if check_quit_game(&game_id, 1).await {
-                    return Some(quit_game(&game_id).await);
+                    return Some(1);
                 }
             }
             return Some(0);
@@ -246,7 +245,9 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
             } else {
                 get_player_1_move(&global_move)
             };
-            return json!({"opponent_found": true, "status": 2, "waiting": 0, "opponent_move": opponent_move}).to_string();
+            quit_game(&game_id).await;
+            let round = get_one_cell!("games", "round", "id", &game_id, i64);
+            return json!({"opponent_found": true, "status": 2, "waiting": 0, "opponent_move": opponent_move, "round": round}).to_string();
         }
         if (player_number == 1 && get_player_1_move(&global_move) == "3")
             || (player_number == 2 && get_player_2_move(&global_move) == "3")
@@ -260,7 +261,13 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
             } else {
                 get_player_1_move(&global_move)
             };
-            json!({ "opponent_found": true, "status": status, "waiting": 0, "opponent_move": opponent_move}).to_string()
+            let your_move = if player_number == 1 {
+                get_player_1_move(&global_move)
+            } else {
+                get_player_2_move(&global_move)
+            };
+            let round = get_one_cell!("games", "round", "id", &game_id, i64);
+            json!({ "opponent_found": true, "status": status, "waiting": 0, "opponent_move": opponent_move, "your_move": your_move, "round": round}).to_string()
         }
     } else {
         json!({"success": false}).to_string()
@@ -306,7 +313,15 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
         let mut scoring_info = get_scoring_info(&game_id).await;
         let outcome = Outcomes::get_outcome(&get_current_move(&game_id).await);
         if outcome != WAITING && outcome != UNDEFINED {
-            add_new_move(&game_id).await;
+            add_new_move(&game_id).await; 
+            let round: i32 = get_one_cell!("games", "round", "id", &game_id, i64).parse().unwrap();
+            mysql::change_row_where(
+                "games",
+                "id",
+                &game_id,
+                "round",
+                &(round + 1).to_string()
+            ).await;
         }
         let mut global_move = if player_number == 1 {
             update_global_move(&get_current_move(&game_id).await, Some(body["move"]), None)
@@ -334,9 +349,6 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
                 return json!({}).to_string();
             }
             _ => {}
-        }
-        if scoring_info.0 == 3 || scoring_info.1 == 3 {
-            quit_game(&game_id).await;
         }
         mysql::change_row_where(
             "games",
@@ -397,6 +409,7 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 "player_1_time",
                 "player_2_time",
                 "log",
+                "round"
             ],
             vec![
                 &id.to_string(),
@@ -409,6 +422,7 @@ async fn new_game(body: HashMap<&str, &str>) -> String {
                 &now(),
                 "",
                 " ",
+                "1"
             ],
         )
         .await
