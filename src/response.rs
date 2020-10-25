@@ -245,9 +245,14 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
             } else {
                 get_player_1_move(&global_move)
             };
+            let your_move = if player_number == 1 {
+                get_player_1_move(&global_move)
+            } else {
+                get_player_2_move(&global_move)
+            };
             quit_game(&game_id).await;
             let round = get_one_cell!("games", "round", "id", &game_id, i64);
-            return json!({"opponent_found": true, "status": 2, "waiting": 0, "opponent_move": opponent_move, "round": round}).to_string();
+            return json!({"opponent_found": true, "status": 2, "waiting": 0, "opponent_move": opponent_move, "your_move": your_move, "round": round}).to_string();
         }
         if (player_number == 1 && get_player_1_move(&global_move) == "3")
             || (player_number == 2 && get_player_2_move(&global_move) == "3")
