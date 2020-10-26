@@ -163,7 +163,7 @@ async fn check_quit_game(game_id: &str, player: i32) -> bool {
         game_id,
         i64
     ) {
-        if player_time + 5 < now().parse().unwrap() {
+        if player_time + 30 < now().parse().unwrap() {
             return true;
         }
     }
@@ -259,7 +259,12 @@ async fn get_status_of_game(body: HashMap<&str, &str>) -> String {
         {
             json!({ "opponent_found": true, "status": status, "waiting": 0}).to_string()
         } else if Outcomes::get_outcome(&global_move) == WAITING {
-            json!({ "opponent_found": true, "status": status, "waiting": 1}).to_string()
+            let your_move = if player_number == 1 {
+                get_player_1_move(&global_move)
+            } else {
+                get_player_2_move(&global_move)
+            };
+            json!({ "opponent_found": true, "status": status, "waiting": 1, "your_move": your_move}).to_string()
         } else {
             let opponent_move = if player_number == 1 {
                 get_player_2_move(&global_move)
