@@ -133,7 +133,7 @@ async fn get_scoring_info(id: &str) -> (i32, i32) {
 async fn new_id() -> String {
     let mut id: String;
     loop {
-        id = thread_rng().sample_iter(&Alphanumeric).take(32).collect();
+        id = thread_rng().sample_iter(&Alphanumeric).take(32).map(|u| u as char).collect();
         if !mysql::row_exists("game_users", "id", &id).await {
             break;
         }
@@ -355,9 +355,7 @@ async fn make_move(body: HashMap<&str, &str>) -> String {
             global_move = update_global_move(
                 &global_move,
                 None,
-                Some(&rockrobot::make_robot_move(&get_one_cell!(
-                    "games", "log", "id", &game_id, String
-                ))),
+                Some(&rand::thread_rng().gen_range(0..3).to_string()),
             );
         }
         match Outcomes::get_outcome(&global_move) {
