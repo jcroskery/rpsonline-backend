@@ -1,6 +1,6 @@
-# api.games.olmmcc.tk
+# rpsonline-backend
 ## Overview
-This is the Rust backend for games.olmmcc.tk. See the games.olmmcc.tk repository for more.
+This is the Rust backend for rpsonline. See [rpsonline-frontend](https://github.com/jcroskery/rpsonline-frontend) for more.
 ## Installation
 Compile and run using `cargo build --release`. 
 ## License
